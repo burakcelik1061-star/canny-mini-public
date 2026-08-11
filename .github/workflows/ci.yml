@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# Faz 7.3 — pipeline iki JOB'a bölündü. İkisi de bağımsız olduğu için
+# PARALEL koşuyorlar: E2E'nin ~2-3 dakikası mevcut lint/test/build süresinin
+# ÜSTÜNE eklenmiyor, yanında akıyor. Ayrıca bir E2E kırıldığında hangi
+# katmanın bozulduğu job adından doğrudan görülüyor.
+#
+# DEPLOY ADIMI YOK ve eklenmeyecek: proje sadece local (Docker Compose) +
+# GitHub ile ilerliyor, bir hosting hedefi YOK.
+
+jobs:
+  lint-and-test:
+    name: Lint, unit & integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Integration testleri (Faz 7.1) GERÇEK bir Postgres'e karşı çalışıyor:
+    # DB kısıtları (@@unique, cascade), guard'lar ve webhook'un ham gövde
+    # imzası ancak böyle kanıtlanabilir. Redis'e ihtiyaç yok — kuyruklar ve
+    # processor'lar test harness'ında DI seviyesinde değiştiriliyor
+    # (bkz. apps/api/test/integration/integration-app.ts).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: canny
+          POSTGRES_PASSWORD: canny
+          POSTGRES_DB: canny_mini_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".nvmrc"
+
+      # Sürüm BİLİNÇLİ olarak belirtilmiyor: pnpm/action-setup kök
+      # package.json'daki `packageManager: "pnpm@11.20.0"` alanını okuyor.
+      # İkisi birden verilirse "Multiple versions of pnpm specified" ile
+      # hata veriyor (CI bir dönem tam bu yüzden kırmızıydı).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (unit)
+        run: pnpm test
+
+      - name: Test (integration)
+        run: pnpm test:integration
+        env:
+          # CI'da kök .env dosyası YOK (gitignore'lu) — uygulamanın
+          # ConfigModule'ü eksik dosyayı sessizce atlar, bu yüzden testin
+          # boot edebilmesi için gereken her değer burada açıkça veriliyor.
+          TEST_DATABASE_URL: postgresql://canny:canny@localhost:5432/canny_mini_test
+          # QueueModule'ün forRootAsync factory'si REDIS_URL'i getOrThrow ile
+          # okuyor; gerçek bir bağlantı açılmıyor (queue/processor'lar
+          # override edildi) ama değerin var olması gerekiyor.
+          REDIS_URL: redis://localhost:6379
+          JWT_ACCESS_SECRET: ci_access_secret
+          JWT_REFRESH_SECRET: ci_refresh_secret
+          JWT_ACCESS_EXPIRES_IN: 15m
+          JWT_REFRESH_EXPIRES_IN: 7d
+          STRIPE_WEBHOOK_SECRET: whsec_ci_test_secret
+          NODE_ENV: test
+
+      - name: Build
+        run: pnpm build
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # E2E'de (Faz 7.2) integration testlerinden farklı olarak GERÇEK bir
+    # apps/api süreci ayağa kalkıyor — `WeeklyDigestService.onModuleInit`
+    # gerçek Redis'e `upsertJobScheduler` çağırdığı için burada Redis
+    # gerçekten gerekli, mock'lanabilecek bir yer yok.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: canny
+          POSTGRES_PASSWORD: canny
+          # Veritabanını `prisma migrate deploy` yoksa kendisi oluşturuyor
+          # (yerelde doğrulandı) — burada sadece sunucunun açılışta bir
+          # veritabanına ihtiyacı olduğu için varsayılan bırakılıyor.
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Job seviyesinde: playwright.config.ts'in başlattığı api süreci bu
+    # değerleri parent process'ten miras alıyor (kendisi sadece
+    # DATABASE_URL/PORT/WEB_ORIGIN veriyor). Turbo strict env modunda
+    # olduğu için ayrıca turbo.json → test:e2e.env listesinde de
+    # sayılmaları gerekiyor, yoksa alt sürece hiç ulaşmazlar.
+    #
+    # NODE_ENV bilinçli olarak set EDİLMİYOR: E2E dev sunucularını
+    # kullanıyor ve `next dev` kendi NODE_ENV'ini yönetiyor.
+    env:
+      E2E_DATABASE_URL: postgresql://canny:canny@localhost:5432/canny_mini_e2e
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret
+      JWT_REFRESH_SECRET: ci_refresh_secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      STRIPE_WEBHOOK_SECRET: whsec_ci_test_secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Chromium ~150MB — lockfile değişmedikçe her koşuda yeniden
+      # indirmenin anlamı yok.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browser
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+
+      # Sadece chromium: 7.2'nin amacı tarayıcı uyumluluk matrisi değil,
+      # ana akışın gerçekten çalıştığını kanıtlamak.
+      - name: Test (E2E)
+        run: pnpm test:e2e
+
+      # Kırmızı bir E2E'yi log okuyarak teşhis etmek zor — Playwright'ın
+      # HTML raporu iz/ekran görüntüsü/video içeriyor (bkz.
+      # playwright.config.ts → use.trace/screenshot/video).
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: apps/e2e/playwright-report/
+          retention-days: 7

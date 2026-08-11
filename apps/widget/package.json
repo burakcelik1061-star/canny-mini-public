@@ -1,0 +1,34 @@
+{
+  "name": "widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Board'un iframe içine gömülebilen bağımsız derlenen minimal bundle'ı (Faz 4.1). apps/web'e bağımlı değil, kendi başına build edilir.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && vite build --config vite.embed.config.ts",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^7",
+    "eslint-plugin-react-refresh": "^0.5",
+    "globals": "^17",
+    "jsdom": "^30.0.1",
+    "typescript": "^5",
+    "typescript-eslint": "^8",
+    "vite": "^8",
+    "vitest": "^4.1.10"
+  },
+  "packageManager": "pnpm@11.20.0"
+}

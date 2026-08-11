@@ -1,0 +1,22 @@
+{
+  "name": "canny-mini",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Feedback & Roadmap Platform (Canny mini) — MVP SaaS portfolio project",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "turbo run test:e2e",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.13"
+  }
+}

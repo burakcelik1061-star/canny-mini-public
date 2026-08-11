@@ -1,0 +1,335 @@
+// Prisma şeması — Faz 1.3: User + Organization/OrganizationMember + Invitation.
+// Board, Post vb. modeller sonraki fazlarda (2.1+) eklenecek.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String // bcrypt hash, asla plaintext saklanmaz
+  name     String
+
+  // Refresh token'ın kendisi değil, hash'i saklanır (leak olsa bile
+  // doğrudan kullanılamasın diye — password ile aynı mantık).
+  // Refresh + logout + tek cihazdan revoke akışı için kullanılır.
+  hashedRefreshToken String?
+
+  organizationMemberships OrganizationMember[]
+  posts                   Post[]
+  votes                   Vote[]
+  comments                Comment[]
+  notifications           Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ER diyagramında (docs/0.1-scope-and-data-model.md) "owner|admin|member" olarak
+// geçiyor; Prisma/TS konvansiyonuna uyup UPPER_CASE tutuyoruz (davranış aynı).
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Organization {
+  id   String @id @default(uuid())
+  name String
+  slug String @unique // public URL için (ör. canny-mini.com/acme-corp)
+
+  // Faz 4.3 — widget tema özelleştirme (0.1 doc'taki "Tema (renk/logo)
+  // özelleştirme" maddesi): widgetColor apps/widget'ın `--cm-accent-*`
+  // CSS değişkenlerini override eder, widgetLogoUrl varsa widget header'ında
+  // board adının yanında gösterilir. İkisi de public (GET
+  // /widget/:orgSlug/branding) — org'un kimliğini gizlemiyorlar.
+  widgetColor   String  @default("#171717")
+  widgetLogoUrl String?
+
+  // Faz 4.3 — widget "identify" (SSO) akışı: host'un KENDİ backend'i bu
+  // secret'ı HMAC-SHA256 anahtarı olarak kullanıp
+  // `email:name:timestamp`'i imzalar (bkz. AuthService.identifyWidgetUser).
+  // Asla public bir uçtan dönmez — sadece org admin/owner'ına
+  // (GET/POST /organizations/:orgId/widget-settings) gösterilir, davet
+  // token'ının response'ta dönmesiyle aynı "henüz email/hesap yönetimi UI'ı
+  // olmayan bir sırrı admin'e doğrudan göster" deseni.
+  widgetSecret String
+
+  // Faz 6.1 — billing. `plan` PostsService/BoardsService'in Faz 6.2'de
+  // limit kontrolü için okuyacağı tek kaynak. Stripe hesabı YOK — stripeCustomerId/stripeSubscriptionId
+  // MockStripeClient'ın ürettiği sahte id'ler (`cus_mock_*`/`sub_mock_*`),
+  // gerçek bir Stripe panelinde arama yapılamaz ama şeması gerçek
+  // entegrasyonla birebir aynı (ileride sadece client implementasyonu
+  // değişecek, bu iki alan aynı kalacak).
+  plan                 Plan    @default(FREE)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+
+  members     OrganizationMember[]
+  invitations Invitation[]
+  boards      Board[]
+  tags        Tag[]
+  invoices    Invoice[]
+
+  createdAt DateTime @default(now())
+
+  @@map("organizations")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+// Faz 6.3 — "fatura geçmişi". Gerçek Stripe'ta bu satırlar
+// `invoice.paid` webhook'larından gelir (her abonelik yenilemesinde bir
+// tane); mock akışımız SADECE `checkout.session.completed`'ı işlediği için
+// (bkz. BillingService.handleWebhookEvent) her org'un burada en fazla "ilk
+// ödeme" kadar satırı olur — aylık yenilemelerin simülasyonu bilinçli
+// olarak kapsam dışı (gerçek bir cron/zamanlayıcı gerektirirdi, 6.3'ün
+// amacı "fatura geçmişi UI'ı gerçek veriyle çalışıyor mu" göstermek).
+model Invoice {
+  id              String @id @default(uuid())
+  orgId           String
+  amountCents     Int
+  currency        String
+  description     String
+  stripeInvoiceId String
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@map("invoices")
+}
+
+model OrganizationMember {
+  id     String  @id @default(uuid())
+  orgId  String
+  userId String
+  role   OrgRole
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  // Bir kullanıcı bir org'a sadece bir kez üye olabilir (birden fazla org'a
+  // üye olabilir, ama aynı org'a iki kez değil).
+  @@unique([orgId, userId])
+  @@map("organization_members")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+}
+
+model Invitation {
+  id     String           @id @default(uuid())
+  orgId  String
+  email  String
+  role   OrgRole // sadece ADMIN|MEMBER — OWNER davetle atanmaz (bkz. InvitationsService)
+  token  String           @unique
+  status InvitationStatus @default(PENDING)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // expiresAt ayrı bir kolon değil: "yedi gün geçti mi" createdAt'ten
+  // hesaplanıyor (bkz. InvitationsService.INVITATION_TTL_MS) — ER
+  // diyagramındaki alan listesiyle birebir uyumlu kalmak için.
+  createdAt DateTime @default(now())
+
+  @@map("invitations")
+}
+
+// Canny'de olduğu gibi varsayılan PUBLIC: bir feedback board'unun asıl amacı
+// end-user'ların görüp oy vermesi. PRIVATE, henüz duyurulmamış/iç kullanım
+// board'ları için (ör. "Internal Bugs") bilinçli bir tercih olarak seçilir.
+enum BoardVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+model Board {
+  id         String          @id @default(uuid())
+  orgId      String
+  name       String
+  slug       String
+  visibility BoardVisibility @default(PUBLIC)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  posts        Post[]
+
+  createdAt DateTime @default(now())
+
+  // Slug org içinde unique (0.1 doc'taki "org içinde/global unique" notu) —
+  // Organization.slug'ın aksine global değil: iki farklı org aynı
+  // "bugs" slug'ını kendi public URL'lerinde kullanabilir
+  // (canny-mini.com/acme-corp/bugs vs canny-mini.com/other-org/bugs).
+  @@unique([orgId, slug])
+  @@map("boards")
+}
+
+// ER diyagramındaki (0.1 doc) "under_review|planned|in_progress|complete|closed"
+// karşılığı — diğer enum'larla aynı UPPER_CASE konvansiyonu.
+enum PostStatus {
+  UNDER_REVIEW
+  PLANNED
+  IN_PROGRESS
+  COMPLETE
+  CLOSED
+}
+
+model Post {
+  id          String     @id @default(uuid())
+  boardId     String
+  authorId    String
+  title       String
+  description String
+  status      PostStatus @default(UNDER_REVIEW)
+
+  // Faz 3.3'ün (duplicate merge) alanı — post modeli 0.1 doc'ta bu alanla
+  // tanımlı, merge iş mantığının kendisi (oyların taşınması vb.) henüz yok.
+  // Hedef post silinirse referans null'a düşer (kendisi silinmez).
+  mergedIntoPostId String?
+  mergedInto       Post?   @relation("PostMerge", fields: [mergedIntoPostId], references: [id], onDelete: SetNull)
+  mergedFrom       Post[]  @relation("PostMerge")
+
+  board         Board          @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author        User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  votes         Vote[]
+  comments      Comment[]
+  notifications Notification[]
+  // Faz 3.3: post <-> tag çoktan çoğa — Prisma'nın implicit m2m'i (ayrı bir
+  // PostTag modeli/DTO'su gerekmiyor, board CRUD'daki gibi başka bir alanı
+  // olan bir join değil, salt ilişki) burada yeterli, elle bir ara tablo
+  // tanımlamak bu ölçekte gereksiz karmaşıklık olurdu.
+  tags          Tag[]          @relation("PostTags")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("posts")
+}
+
+// 0.1 doc'taki ER şemasında (TAG) org-scoped: bir tag bir board'a değil
+// org'a ait, birden fazla board'un post'ları aynı tag kümesini paylaşabilir
+// (Board.slug'ın org içinde unique olması gibi bir izolasyon deseni: tag adı
+// org içinde unique, org'lar arası çakışma sorun değil).
+model Tag {
+  id    String @id @default(uuid())
+  orgId String
+  name  String
+  // ER şemasındaki `color` alanı — admin UI'da kanban kartlarının/etiket
+  // rozetlerinin rengi için, işlevsel bir kısıtlama taşımıyor.
+  color String @default("#71717a")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  posts        Post[]       @relation("PostTags")
+
+  createdAt DateTime @default(now())
+
+  @@unique([orgId, name])
+  @@map("tags")
+}
+
+model Vote {
+  id     String @id @default(uuid())
+  postId String
+  userId String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  // 0.1 doc'taki kısıtlama: bir kullanıcı bir post'a sadece bir kez oy
+  // verebilir — OrganizationMember'daki @@unique([orgId, userId]) ile aynı
+  // desen.
+  @@unique([postId, userId])
+  @@map("votes")
+}
+
+model Comment {
+  id       String @id @default(uuid())
+  postId   String
+  authorId String
+  body     String
+
+  // Faz 3.4'ün ("Admin yanıtı") alanı — 0.1 doc'taki ER şemasında Comment'in
+  // parçası, ama resmi yanıt işaretleme mantığı henüz yok: 2.4'te oluşturulan
+  // her yorum `false` ile başlar. Faz 3.4'te org admin/owner'ının kendi
+  // yanıtını bununla işaretleyebilmesi eklenecek.
+  isOfficial Boolean @default(false)
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("comments")
+}
+
+// Faz 5.4 — in-app bildirim merkezi (opsiyonel, prompt-library 5.4).
+// 5.2'nin email bildirimiyle AYNI olayda (status değişikliği) tetiklenir —
+// `StatusChangeNotificationProcessor` her alıcı için hem email gönderiyor
+// hem burada bir satır oluşturuyor; tek bir "type" var ama gelecekte başka
+// olaylar (ör. official yanıt) eklenirse enum genişler diye şimdiden bir
+// enum (sabit bir string değil).
+enum NotificationType {
+  STATUS_CHANGE
+}
+
+// Faz "billing sertleştirme" — webhook idempotency. Gerçek Stripe aynı
+// event'i (en-az-bir-kez teslim garantisi) birden fazla kez gönderebilir;
+// işlenen event id'lerini burada tutarak tekrar teslim edilen bir ödemenin
+// ikinci bir Invoice satırı açmasını engelliyoruz. `eventId` unique — aynı
+// event ikinci kez geldiğinde INSERT P2002 ile patlar, işlem geri sarılır ve
+// çağıran taraf bunu sessiz bir no-op olarak ele alır (bkz.
+// BillingService.handleWebhookEvent). Mock akışta event.id imzalı link'ten
+// türeyen sessionId'ye bağlı olduğu için (bkz. MockStripeClient) saldırgan
+// tarafından serbestçe seçilemez.
+model ProcessedWebhookEvent {
+  id        String   @id @default(uuid())
+  eventId   String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("processed_webhook_events")
+}
+
+model Notification {
+  id      String           @id @default(uuid())
+  userId  String
+  type    NotificationType @default(STATUS_CHANGE)
+  message String
+
+  // Hangi post'la ilgili — bildirim listesinde tıklanınca oraya
+  // götürebilmek için. Post silinirse (şu an bir silme endpoint'i yok ama
+  // ileride olursa) bildirim de anlamsızlaşacağı için Cascade — mergedInto
+  // gibi "kaynağı SetNull ile koru" değil, çünkü bildirimin TEK amacı bu
+  // post'a link vermek.
+  postId String?
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  read Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  // Bildirim listesi hep `userId` + en yeni önce çekiliyor, `read` filtresi
+  // (unread count) de sık — kompozit bir index bu iki sorguyu da kapsıyor.
+  @@index([userId, read])
+  @@map("notifications")
+}

@@ -1,0 +1,292 @@
+/* Widget başka bir sitenin içine iframe'lenecek — Tailwind (apps/web'in
+   seçimi) burada bilinçli olarak yok: hem "minimal bundle" hedefiyle
+   çelişirdi hem de host sayfanın kendi CSS'iyle çakışma riski taşırdı. Tüm
+   sınıflar `cm-` önekli (Canny Mini) tutuldu ki host sayfanın global
+   stilleriyle (ör. bir `.button` reset'i) çakışmasın — iframe zaten kendi
+   stil kapsülünü sağlıyor ama önek yine de ucuz bir ek güvence.
+
+   Renkler CSS custom property olarak tanımlı (4.2): varsayılan `:root`
+   light, `prefers-color-scheme: dark` bunu override eder — ama host sayfa
+   embed script üzerinden `data-theme="dark"|"light"` gönderirse (bkz.
+   use-embed-sync.ts → applyTheme) `:root[data-theme]` seçicileri OS
+   tercihinden BAĞIMSIZ olarak kazanmalı (host'un kendi teması varsa
+   widget'ın OS'e değil host'a uyması beklenir). Attribute seçicisi media
+   query'den her zaman daha spesifik olduğu için sıralama önemli değil. */
+
+:root {
+  color-scheme: light dark;
+  --cm-text: #111;
+  --cm-muted: #666;
+  --cm-border: rgba(0, 0, 0, 0.12);
+  --cm-border-strong: rgba(0, 0, 0, 0.15);
+  --cm-surface-subtle: rgba(0, 0, 0, 0.06);
+  --cm-accent-bg: #171717;
+  --cm-accent-text: #fff;
+  --cm-error: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cm-text: #f2f2f2;
+    --cm-muted: #aaa;
+    --cm-border: rgba(255, 255, 255, 0.15);
+    --cm-border-strong: rgba(255, 255, 255, 0.2);
+    --cm-surface-subtle: rgba(255, 255, 255, 0.1);
+    --cm-accent-bg: #e5e5e5;
+    --cm-accent-text: #111;
+    --cm-error: #f87171;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --cm-text: #f2f2f2;
+  --cm-muted: #aaa;
+  --cm-border: rgba(255, 255, 255, 0.15);
+  --cm-border-strong: rgba(255, 255, 255, 0.2);
+  --cm-surface-subtle: rgba(255, 255, 255, 0.1);
+  --cm-accent-bg: #e5e5e5;
+  --cm-accent-text: #111;
+  --cm-error: #f87171;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --cm-text: #111;
+  --cm-muted: #666;
+  --cm-border: rgba(0, 0, 0, 0.12);
+  --cm-border-strong: rgba(0, 0, 0, 0.15);
+  --cm-surface-subtle: rgba(0, 0, 0, 0.06);
+  --cm-accent-bg: #171717;
+  --cm-accent-text: #fff;
+  --cm-error: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  color: var(--cm-text);
+  background: transparent;
+}
+
+.cm-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  max-width: 640px;
+}
+
+.cm-widget--message {
+  padding: 24px;
+  color: var(--cm-muted);
+}
+
+.cm-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cm-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.cm-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.cm-header p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--cm-muted);
+}
+
+.cm-panel {
+  border: 1px solid var(--cm-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cm-form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cm-form input,
+.cm-form textarea {
+  border: 1px solid var(--cm-border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+.cm-button {
+  align-self: flex-start;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--cm-accent-text);
+  background: var(--cm-accent-bg);
+  cursor: pointer;
+}
+
+.cm-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cm-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--cm-muted);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.cm-muted {
+  margin: 0;
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.cm-error {
+  margin: 0;
+  color: var(--cm-error);
+  font-size: 12px;
+}
+
+.cm-empty {
+  color: var(--cm-muted);
+  font-size: 13px;
+}
+
+.cm-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.cm-tab {
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--cm-muted);
+  background: var(--cm-surface-subtle);
+  cursor: pointer;
+}
+
+.cm-tab--active {
+  color: var(--cm-accent-text);
+  background: var(--cm-accent-bg);
+}
+
+.cm-post-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cm-post {
+  display: flex;
+  gap: 12px;
+  border: 1px solid var(--cm-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cm-vote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--cm-border-strong);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.cm-vote:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cm-vote--active {
+  border-color: var(--cm-accent-bg);
+  background: var(--cm-accent-bg);
+  color: var(--cm-accent-text);
+}
+
+.cm-post-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.cm-post-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cm-post-title-row h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.cm-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cm-surface-subtle);
+  color: var(--cm-muted);
+}
+
+.cm-post-body p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--cm-muted);
+  white-space: pre-wrap;
+}

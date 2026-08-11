@@ -1,0 +1,44 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# turbo
+.turbo/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# test coverage
+coverage/
+
+# playwright (Faz 7.2) — koşu çıktıları, izler, ekran görüntüleri, videolar
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+.last-run.json
+
+# AI agent instruction files (next dev tarafindan otomatik uretilir)
+AGENTS.md

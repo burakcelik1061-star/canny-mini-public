@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  // "prisma" (Faz 7.4): seed.ts eklenince derlemeye dahil oldu ve
+  // TypeScript'in hesapladığı ortak kök dizin src/ yerine apps/api/ oldu —
+  // çıktı sessizce dist/*.js'ten dist/src/*.js'e kaydı. Bu, ConfigModule'ün
+  // `join(__dirname, '../../../.env')` yolunu ve `start:prod`'un
+  // `node dist/main` komutunu bozdu (api "STRIPE_WEBHOOK_SECRET tanımlı
+  // değil" ile boot edemedi, E2E'de yakalandı). seed.ts zaten ts-node ile
+  // doğrudan çalıştırılıyor, derlenmesine gerek yok.
+  "exclude": ["node_modules", "test", "dist", "prisma", "**/*spec.ts"]
+}

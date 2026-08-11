@@ -1,0 +1,67 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      // Turbo 2.x varsayılan olarak "strict" env modunda: burada
+      // SAYILMAYAN hiçbir ortam değişkeni task'ın alt sürecine geçmez.
+      // Local'de bu fark edilmiyordu çünkü kök .env dosyası aynı değerleri
+      // zaten sağlıyordu; CI'da .env olmadığı için uygulama
+      // "STRIPE_WEBHOOK_SECRET tanımlı değil" ile boot edemedi.
+      "env": [
+        "TEST_DATABASE_URL",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_ACCESS_SECRET",
+        "JWT_REFRESH_SECRET",
+        "JWT_ACCESS_EXPIRES_IN",
+        "JWT_REFRESH_EXPIRES_IN",
+        "STRIPE_WEBHOOK_SECRET",
+        "WEB_ORIGIN",
+        "NODE_ENV"
+      ]
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      // test:integration'daki aynı Turbo "strict env" tuzağı — burada
+      // sayılmayan hiçbir değişken playwright'a, dolayısıyla onun
+      // başlattığı api/web süreçlerine ULAŞMAZ.
+      //
+      // playwright.config.ts api'ye sadece DATABASE_URL/PORT/WEB_ORIGIN
+      // veriyor; JWT secret'ları, REDIS_URL ve STRIPE_WEBHOOK_SECRET
+      // parent process'ten miras alınıyor. Local'de kök .env bunları
+      // sağladığı için eksiklik görünmez — CI'da .env yok, bu liste
+      // olmadan api boot edemez (7.1'de aynı hata CI'da yakalanmıştı).
+      "env": [
+        "E2E_DATABASE_URL",
+        "REDIS_URL",
+        "JWT_ACCESS_SECRET",
+        "JWT_REFRESH_SECRET",
+        "JWT_ACCESS_EXPIRES_IN",
+        "JWT_REFRESH_EXPIRES_IN",
+        "STRIPE_WEBHOOK_SECRET",
+        "NODE_ENV",
+        "CI"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
+  }
+}
